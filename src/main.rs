@@ -1,4 +1,4 @@
-use actix_web::{App, HttpServer};
+use actix_web::{App, HttpServer, web};
 use anyhow::Context;
 use http::routes::{
     check_balance, get_transaction, get_transactions, hello, login, new_transaction, new_user,
@@ -11,16 +11,25 @@ pub mod http;
 async fn main() -> std::io::Result<()> {
     let database_url = dotenvy::var("DATABASE_URL")
         // The error from `var()` doesn't mention the environment variable.
-        .context("DATABASE_URL must be set")?;
+        .context("DATABASE_URL must be set")
+        .unwrap();
 
     let db = PgPoolOptions::new()
         .max_connections(20)
         .connect(&database_url)
         .await
-        .context("failed to connect to DATABASE_URL")?;
+        .context("failed to connect to DATABASE_URL")
+        .unwrap();
 
-    HttpServer::new(|| {
+    // Initialize database tables
+    http::db::model::init_db(&db)
+        .await
+        .context("failed to initialize database tables")
+        .unwrap();
+
+    HttpServer::new(move || {
         App::new()
+            .app_data(web::Data::new(db.clone()))
             .service(hello)
             .service(new_user)
             .service(login)
@@ -30,7 +39,7 @@ async fn main() -> std::io::Result<()> {
             .service(new_transaction)
             .service(get_transaction)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 4040))?
     .run()
     .await
 }
