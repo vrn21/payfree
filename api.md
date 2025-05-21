@@ -115,7 +115,7 @@ This document provides details on the API endpoints, including the HTTP method, 
       "txn_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       "amount": 50.0,
       "from_username": "ayush2",
-      "to_username": "anotheruser",
+      "to_username": "bhargav",
       "time": "2024-05-03T10:00:00Z"
     }
   ]
@@ -161,19 +161,36 @@ This document provides details on the API endpoints, including the HTTP method, 
   Transaction inserted
   ```
 - **Additional Notes:** Requires a valid JWT token in the `Authorization` header. The token's subject (`sub` claim) must match the `from_username` in the request body. The system verifies that the sender has sufficient balance.
-- **Example `curl` command:**
+
+
+  first lets create a new user:
+
+  ```sh
+  curl -X POST http://localhost:4040/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userid": "55555558-5555-5555-5555-555555555555",
+    "name": "Bhargav",
+    "username": "bhargav",
+    "phno": "5555555555",
+    "address": "Bangalore",
+    "balance": 900.0,
+    "password": "password9"
+  }'
+
+ - **Example `curl` command for transacting:**
   ```sh
   curl -X POST http://localhost:4040/transactions/new \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <JWT_TOKEN>" \
   -d '{
-    "txn_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "txn_id": "aaaaaaab-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     "amount": 100,
     "from_username": "ayush2",
     "to_username": "bob",
     "time": "2024-05-30T12:00:00Z"
   }'
-  ```
+```
 
 ---
 
@@ -185,7 +202,7 @@ This document provides details on the API endpoints, including the HTTP method, 
 - **Response:** A JSON object containing transaction details.
   ```json
   {
-    "txn_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "txn_id": "aaaaaaab-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     "amount": 50.0,
     "from_username": "ayush2",
     "to_username": "bob",
@@ -195,6 +212,6 @@ This document provides details on the API endpoints, including the HTTP method, 
 - **Additional Notes:** Requires a valid JWT token in the `Authorization` header.
 - **Example `curl` command:**
   ```sh
-  curl http://localhost:4040/transactions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa \
+  curl http://localhost:4040/transactions/aaaaaaab-aaaa-aaaa-aaaa-aaaaaaaaaaaa \
   -H "Authorization: Bearer <JWT_TOKEN>"
   ```
