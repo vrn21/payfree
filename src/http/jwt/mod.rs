@@ -48,3 +48,36 @@ pub fn decode_jwt(token: &str, secret: &str) -> Result<TokenData<Claims>, JwtErr
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn test_generate_and_decode_jwt() {
+        let secret = "test_secret";
+        let username = "testuser";
+        let expiry_seconds = 3600;
+        let token = generate_jwt(username, secret, expiry_seconds).expect("JWT generation failed");
+        assert!(!token.is_empty());
+
+        let decoded = decode_jwt(&token, secret).expect("JWT decoding failed");
+        assert_eq!(decoded.claims.sub, username);
+
+        // Check expiration is in the future
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert!(decoded.claims.exp as u64 > now);
+    }
+
+    #[test]
+    fn test_decode_jwt_with_wrong_secret_fails() {
+        let secret = "test_secret";
+        let wrong_secret = "wrong_secret";
+        let username = "testuser";
+        let expiry_seconds = 3600;
+        let token = generate_jwt(username, secret, expiry_seconds).expect("JWT generation failed");
+        let result = decode_jwt(&token, wrong_secret);
+        assert!(result.is_err());
+    }
+}

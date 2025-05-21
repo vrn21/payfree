@@ -13,7 +13,6 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let database_url = dotenvy::var("DATABASE_URL")
-        // The error from `var()` doesn't mention the environment variable.
         .context("DATABASE_URL must be set")
         .unwrap();
 
@@ -25,7 +24,6 @@ async fn main() -> std::io::Result<()> {
         .unwrap();
     sqlx::migrate!("./migrations").run(&db).await.unwrap();
 
-    // Initialize database tables
     http::db::model::init_db(&db)
         .await
         .context("failed to initialize database tables")
@@ -49,10 +47,3 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
-
-/*
-what to do rest:
-    look how to do auth,jwt?
-    then look how to properly query, what is the most efficent way to do so?
-    then integrate everything together.
-*/

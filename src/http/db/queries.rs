@@ -266,3 +266,147 @@ pub async fn fetch_transaction(pool: &PgPool, txn_id: Uuid) -> Result<Option<Tra
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use sqlx::{PgPool, postgres::PgPoolOptions};
+    use uuid::Uuid;
+
+    async fn setup_test_db() -> PgPool {
+        let database_url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("Failed to connect to test database")
+    }
+
+    #[tokio::test]
+    async fn test_new_user_and_login() {
+        let pool = setup_test_db().await;
+        let username = format!("testuser_{}", Uuid::new_v4());
+        let user = User {
+            userid: Uuid::new_v4(),
+            name: "Test User".to_string(),
+            username: username.clone(),
+            phno: "1234567890".to_string(),
+            address: "Test Address".to_string(),
+            balance: 100.0,
+            password_hash: "hash".to_string(),
+        };
+        // Insert user
+        let res = new_user(&pool, &user).await;
+        assert!(res.is_ok());
+
+        // Login user
+        let found = login(&pool, &username).await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().username, username);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_profile_and_balance() {
+        let pool = setup_test_db().await;
+        let username = format!("testuser_{}", Uuid::new_v4());
+        let user = User {
+            userid: Uuid::new_v4(),
+            name: "Test User".to_string(),
+            username: username.clone(),
+            phno: "1234567890".to_string(),
+            address: "Test Address".to_string(),
+            balance: 123.45,
+            password_hash: "hash".to_string(),
+        };
+        new_user(&pool, &user).await.unwrap();
+
+        let profile = fetch_profile(&pool, &username).await.unwrap();
+        assert!(profile.is_some());
+        assert_eq!(profile.as_ref().unwrap().balance, 123.45);
+
+        let balance = fetch_balance(&pool, &username).await.unwrap();
+        assert_eq!(balance, Some(123.45));
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_fetch_transaction() {
+        let pool = setup_test_db().await;
+        let user1 = User {
+            userid: Uuid::new_v4(),
+            name: "Sender".to_string(),
+            username: format!("sender_{}", Uuid::new_v4()),
+            phno: "1111111111".to_string(),
+            address: "Sender Address".to_string(),
+            balance: 500.0,
+            password_hash: "hash".to_string(),
+        };
+        let user2 = User {
+            userid: Uuid::new_v4(),
+            name: "Receiver".to_string(),
+            username: format!("receiver_{}", Uuid::new_v4()),
+            phno: "2222222222".to_string(),
+            address: "Receiver Address".to_string(),
+            balance: 100.0,
+            password_hash: "hash".to_string(),
+        };
+        new_user(&pool, &user1).await.unwrap();
+        new_user(&pool, &user2).await.unwrap();
+
+        let txn_id = Uuid::new_v4();
+        let txn = Transaction {
+            txn_id,
+            amount: 50.0,
+            from_username: user1.username.clone(),
+            to_username: user2.username.clone(),
+            time: Utc::now(),
+        };
+        let res = insert_transaction(&pool, &txn).await;
+        assert!(res.is_ok());
+
+        let fetched = fetch_transaction(&pool, txn_id).await.unwrap();
+        assert!(fetched.is_some());
+        let fetched_txn = fetched.unwrap();
+        assert_eq!(fetched_txn.amount, 50.0);
+        assert_eq!(fetched_txn.from_username, user1.username);
+        assert_eq!(fetched_txn.to_username, user2.username);
+
+        let txns = fetch_transactions(&pool, &user1.username).await.unwrap();
+        assert!(txns.iter().any(|t| t.txn_id == txn_id));
+    }
+
+    #[tokio::test]
+    async fn test_balance_low_error() {
+        let pool = setup_test_db().await;
+        let user1 = User {
+            userid: Uuid::new_v4(),
+            name: "Sender".to_string(),
+            username: format!("sender2_{}", Uuid::new_v4()),
+            phno: "1111111111".to_string(),
+            address: "Sender Address".to_string(),
+            balance: 10.0,
+            password_hash: "hash".to_string(),
+        };
+        let user2 = User {
+            userid: Uuid::new_v4(),
+            name: "Receiver".to_string(),
+            username: format!("receiver2_{}", Uuid::new_v4()),
+            phno: "2222222222".to_string(),
+            address: "Receiver Address".to_string(),
+            balance: 100.0,
+            password_hash: "hash".to_string(),
+        };
+        new_user(&pool, &user1).await.unwrap();
+        new_user(&pool, &user2).await.unwrap();
+
+        let txn = Transaction {
+            txn_id: Uuid::new_v4(),
+            amount: 100.0, // more than sender's balance
+            from_username: user1.username.clone(),
+            to_username: user2.username.clone(),
+            time: Utc::now(),
+        };
+        let res = insert_transaction(&pool, &txn).await;
+        assert!(matches!(res, Err(ApiError::BalanceLow)));
+    }
+}

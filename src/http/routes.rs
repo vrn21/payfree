@@ -225,3 +225,73 @@ pub fn init_routes(cfg: &mut actix_web::web::ServiceConfig) {
         .service(new_transaction)
         .service(get_transaction);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, web, App};
+    use serde_json::json;
+    use sqlx::postgres::PgPoolOptions;
+    use std::env;
+    use uuid::Uuid;
+
+    #[actix_rt::test]
+    async fn test_hello_route() {
+        let app = test::init_service(App::new().service(hello)).await;
+        let req = test::TestRequest::get().uri("/").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+        let body = test::read_body(resp).await;
+        assert_eq!(body, "Hi Raghav!");
+    }
+
+    // NOTE: The following tests are illustrative and may require a test database and proper setup.
+    // They are designed to show how to structure route handler tests.
+
+    #[actix_rt::test]
+    async fn test_signup_and_login_route() {
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set for tests");
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(pool.clone()))
+                .service(new_user)
+                .service(login)
+        ).await;
+
+        let username = format!("testuser_{}", Uuid::new_v4());
+        let signup_req = test::TestRequest::post()
+            .uri("/auth/signup")
+            .set_json(&json!({
+                "userid": Uuid::new_v4(),
+                "name": "Test User",
+                "username": username,
+                "phno": "1234567890",
+                "address": "Test Address",
+                "balance": 100.0,
+                "password": "testpassword"
+            }))
+            .to_request();
+        let signup_resp = test::call_service(&app, signup_req).await;
+        assert!(signup_resp.status().is_success());
+        let body: serde_json::Value = test::read_body_json(signup_resp).await;
+        assert!(body.get("token").is_some());
+
+        let login_req = test::TestRequest::post()
+            .uri("/auth/login")
+            .set_json(&json!({
+                "username": username,
+                "password": "testpassword"
+            }))
+            .to_request();
+        let login_resp = test::call_service(&app, login_req).await;
+        assert!(login_resp.status().is_success());
+        let body: serde_json::Value = test::read_body_json(login_resp).await;
+        assert!(body.get("token").is_some());
+    }
+}

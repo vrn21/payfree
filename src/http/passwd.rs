@@ -29,3 +29,25 @@ pub async fn verify(password: String, hash: String) -> anyhow::Result<bool> {
     .await
     .context("panic in verify()")?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_hash_and_verify_success() {
+        let password = "test_password".to_string();
+        let hash = hash(password.clone()).await.expect("Hashing failed");
+        let is_valid = verify(password, hash).await.expect("Verification failed");
+        assert!(is_valid, "Password should verify successfully");
+    }
+
+    #[tokio::test]
+    async fn test_verify_failure() {
+        let password = "test_password".to_string();
+        let wrong_password = "wrong_password".to_string();
+        let hash = hash(password).await.expect("Hashing failed");
+        let is_valid = verify(wrong_password, hash).await.expect("Verification failed");
+        assert!(!is_valid, "Wrong password should not verify");
+    }
+}
