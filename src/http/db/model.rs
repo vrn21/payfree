@@ -16,8 +16,6 @@ pub struct User {
     pub password_hash: String,
 }
 
-
-
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Transaction {
     pub txn_id: Uuid,

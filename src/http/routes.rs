@@ -3,17 +3,19 @@ use crate::http::db::queries;
 use crate::http::errors::ApiError;
 use crate::http::jwt::extractor::AuthenticatedUser;
 use actix_web::{HttpResponse, Responder, get, post, web};
-use serde::{Deserialize, Serialize};
+use log::{debug, error, warn};
+use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 #[get("/")]
 pub async fn hello() -> impl Responder {
+    debug!("Received request: GET /");
     HttpResponse::Ok().body("Hi Raghav!")
 }
 
 use crate::http::db::model::User;
-use crate::http::jwt::{Claims, generate_jwt};
+use crate::http::jwt::generate_jwt;
 use crate::http::passwd;
 
 use std::env;
@@ -34,10 +36,12 @@ pub async fn new_user(
     pool: web::Data<PgPool>,
     req: web::Json<SignupRequest>,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("POST /auth/signup called with username: {}", req.username);
     let req = req.into_inner();
-    let password_hash = passwd::hash(req.password)
-        .await
-        .map_err(|_| ApiError::InternalServerError)?;
+    let password_hash = passwd::hash(req.password).await.map_err(|_| {
+        error!("Password hashing failed for signup");
+        ApiError::InternalServerError
+    })?;
     let user = User {
         userid: req.userid,
         name: req.name,
@@ -48,9 +52,12 @@ pub async fn new_user(
         password_hash,
     };
     queries::new_user(&pool, &user).await?;
+    debug!("User created: {}", user.username);
     let secret = env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
-    let token =
-        generate_jwt(&req.username, &secret, 3600).map_err(|_| ApiError::InternalServerError)?;
+    let token = generate_jwt(&req.username, &secret, 3600).map_err(|_| {
+        error!("JWT generation failed for signup");
+        ApiError::InternalServerError
+    })?;
     Ok(HttpResponse::Ok().json(serde_json::json!({ "token": token })))
 }
 
@@ -65,19 +72,31 @@ pub async fn login(
     pool: web::Data<PgPool>,
     req: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("POST /auth/login called for username: {}", req.username);
     let req = req.into_inner();
-    let user = queries::login(&pool, &req.username)
-        .await?
-        .ok_or(ApiError::UserNotFound)?;
+    let user = queries::login(&pool, &req.username).await?.ok_or_else(|| {
+        warn!("Login failed: user not found: {}", req.username);
+        ApiError::UserNotFound
+    })?;
     let valid = passwd::verify(req.password, user.password_hash)
         .await
-        .map_err(|_| ApiError::InternalServerError)?;
+        .map_err(|_| {
+            error!("Password verification failed for login");
+            ApiError::InternalServerError
+        })?;
     if !valid {
+        warn!(
+            "Login failed: invalid credentials for username: {}",
+            user.username
+        );
         return Err(ApiError::InvalidCredentials);
     }
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret".to_string());
-    let token =
-        generate_jwt(&user.username, &secret, 3600).map_err(|_| ApiError::InternalServerError)?;
+    let token = generate_jwt(&user.username, &secret, 3600).map_err(|_| {
+        error!("JWT generation failed for login");
+        ApiError::InternalServerError
+    })?;
+    debug!("Login successful for username: {}", user.username);
     Ok(HttpResponse::Ok().json(serde_json::json!({ "token": token })))
 }
 #[get("/users/{username}/profile")]
@@ -86,13 +105,21 @@ pub async fn profile(
     path: web::Path<String>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("GET /users/{}/profile called by {}", path, user.username);
     let username = path.into_inner();
     if username != user.username {
+        warn!(
+            "Unauthorized profile access attempt: {} tried to access {}",
+            user.username, username
+        );
         return Err(ApiError::Unauthorized);
     }
     let user = queries::fetch_profile(&pool, &username)
         .await?
-        .ok_or(ApiError::UserNotFound)?;
+        .ok_or_else(|| {
+            warn!("Profile not found for username: {}", username);
+            ApiError::UserNotFound
+        })?;
     Ok(HttpResponse::Ok().json(user))
 }
 
@@ -102,11 +129,17 @@ pub async fn get_transactions(
     path: web::Path<String>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("Received request: GET /users/{}/transactions", path);
     let username = path.into_inner();
     if username != user.username {
+        warn!(
+            "Unauthorized transactions access attempt: {} as {}",
+            user.username, username
+        );
         return Err(ApiError::Unauthorized);
     }
     let txns = queries::fetch_transactions(&pool, &username).await?;
+    debug!("Transactions fetched for username: {}", username);
     Ok(HttpResponse::Ok().json(txns))
 }
 
@@ -116,13 +149,22 @@ pub async fn check_balance(
     path: web::Path<String>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("GET /users/{}/balance called by {}", path, user.username);
     let username = path.into_inner();
     if username != user.username {
+        warn!(
+            "Unauthorized balance access attempt: {} as {}",
+            user.username, username
+        );
         return Err(ApiError::Unauthorized);
     }
     let balance = queries::fetch_balance(&pool, &username)
         .await?
-        .ok_or(ApiError::UserNotFound)?;
+        .ok_or_else(|| {
+            warn!("Balance not found for username: {}", username);
+            ApiError::UserNotFound
+        })?;
+    debug!("Balance fetched for username: {}", username);
     Ok(HttpResponse::Ok().json(balance))
 }
 
@@ -132,13 +174,26 @@ pub async fn new_transaction(
     txn: web::Json<model::Transaction>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, ApiError> {
-    // Only allow if the sender is the authenticated user
+    debug!("POST /transactions/new called by {}", user.username);
     if txn.from_username != user.username {
+        warn!(
+            "Unauthorized transaction attempt: {} tried to send from {}",
+            user.username, txn.from_username
+        );
         return Err(ApiError::Unauthorized);
     }
     match queries::insert_transaction(&pool, &txn.into_inner()).await {
-        Ok(_) => Ok(HttpResponse::Ok().body("Transaction inserted")),
-        Err(ApiError::BalanceLow) => Ok(HttpResponse::BadRequest().body("Insufficient balance")),
+        Ok(_) => {
+            debug!("Transaction inserted by {}", user.username);
+            Ok(HttpResponse::Ok().body("Transaction inserted"))
+        }
+        Err(ApiError::BalanceLow) => {
+            warn!(
+                "Transaction failed: insufficient balance for {}",
+                user.username
+            );
+            Ok(HttpResponse::BadRequest().body("Insufficient balance"))
+        }
         Err(e) => Err(e),
     }
 }
@@ -149,9 +204,24 @@ pub async fn get_transaction(
     path: web::Path<Uuid>,
     _user: AuthenticatedUser,
 ) -> Result<HttpResponse, ApiError> {
+    debug!("GET /transactions/{} called", path);
     let txn_id = path.into_inner();
     let txn = queries::fetch_transaction(&pool, txn_id)
         .await?
-        .ok_or(ApiError::UserNotFound)?;
+        .ok_or_else(|| {
+            warn!("Transaction not found for txn_id: {}", txn_id);
+            ApiError::UserNotFound
+        })?;
     Ok(HttpResponse::Ok().json(txn))
+}
+
+pub fn init_routes(cfg: &mut actix_web::web::ServiceConfig) {
+    cfg.service(hello)
+        .service(new_user)
+        .service(login)
+        .service(profile)
+        .service(get_transactions)
+        .service(check_balance)
+        .service(new_transaction)
+        .service(get_transaction);
 }

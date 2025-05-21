@@ -1,5 +1,4 @@
 use actix_web::error::PayloadError;
-use actix_web::http::StatusCode;
 use sqlx::Error as SqlxError;
 use thiserror::Error;
 
@@ -36,7 +35,6 @@ pub enum ApiError {
 pub type Result<T> = std::result::Result<T, ApiError>;
 
 use actix_web::{HttpResponse, ResponseError};
-use std::fmt;
 
 impl ResponseError for ApiError {
     fn error_response(&self) -> HttpResponse {
